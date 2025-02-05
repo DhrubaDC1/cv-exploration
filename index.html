@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Client-Side Detection</title>
+    <style>
+        /* Same styling as before */
+    </style>
+</head>
+<body>
+    <!-- Same HTML structure as before -->
+
+    <!-- Updated compatible versions -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.8.6/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+    <script>
+        async function startDetection() {
+            try {
+                // Load models sequentially to avoid conflicts
+                await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+                await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+                const objectModel = await cocoSsd.load();
+
+                // Setup video stream
+                const video = document.getElementById('videoElement');
+                const canvas = document.getElementById('outputCanvas');
+                const ctx = canvas.getContext('2d');
+
+                const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                video.srcObject = stream;
+
+                async function detectFrame() {
+                    // Use TFJS backend utilities
+                    await tf.nextFrame().then(async () => {
+                        // Face detection
+                        const faceDetections = await faceapi.detectAllFaces(
+                            video,
+                            new faceapi.TinyFaceDetectorOptions()
+                        ).withFaceLandmarks();
+
+                        // Object detection
+                        const objects = await objectModel.  detect(video);
+
+                        // Clear canvas
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        
+                        // Draw face detections
+                        faceDetections.forEach(detection => {
+                            const box = detection.detection.box;
+                            ctx.strokeStyle = '#00ff00';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(box.x, box.y, box.width, box.height);
+                            ctx.fillText('Face', box.x, box.y > 10 ? box.y - 5 : 10);
+                        });
+
+                        // Draw object detections
+                        objects.forEach(object => {
+                            ctx.strokeStyle = '#ff0000';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(...object.bbox);
+                            ctx.fillText(
+                                `${object.class} (${Math.round(object.score * 100)}%)`,
+                                object.bbox[0],
+                                object.bbox[1] > 10 ? object.bbox[1] - 5 : 10
+                            );
+                        });
+                    });
+
+                    requestAnimationFrame(detectFrame);
+                }
+
+                video.addEventListener('play', detectFrame);
+            } catch (error) {
+                console.error('Error initializing:', error);
+            }
+        }
+
+        window.onload = startDetection;
+    </script>
+</body>
+</html>
