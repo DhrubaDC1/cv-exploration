@@ -1,149 +1,225 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <title>Face, Emotion, and Object Detection</title>
-    <!-- Load TensorFlow.js (using version 2.0.0 for compatibility) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
-    <!-- Load face-api.js -->
-    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-    <!-- Load COCO-SSD (depends on TensorFlow.js) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-    <style>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Object and Emotion Detection with TensorFlow.js</title>
+  <!-- Load TensorFlow.js first -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
+  <!-- Then load face-api.js -->
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <!-- Then load COCO-SSD -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+      background-color: #f5f5f5;
+      overflow-x: hidden;
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 20px;
+      font-size: 2rem;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      position: relative;
+      z-index: 10;
+    }
+
+    .video-container {
+      position: relative;
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      aspect-ratio: 16/9;
+    }
+
+    #video,
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    canvas {
+      pointer-events: none;
+    }
+
+    @media (max-width: 768px) {
       body {
-        text-align: center;
-        font-family: Arial, sans-serif;
-      }
-      canvas {
-        position: absolute;
-        top: 0;
-        left: 0;
-      }
-      #videoContainer {
-        position: relative;
-        display: inline-block;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Face, Emotion, and Object Detection</h1>
-    <div id="videoContainer">
-      <video id="video" width="720" height="560" autoplay muted></video>
-      <canvas id="overlay"></canvas>
-    </div>
-
-    <script>
-      const video = document.getElementById('video');
-      const overlay = document.getElementById('overlay');
-      const context = overlay.getContext('2d');
-
-      let objectModel; // To hold the COCO-SSD model
-
-      // Start the webcam video stream
-      async function setupCamera() {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
-          video.srcObject = stream;
-        } catch (error) {
-          console.error('Error accessing webcam:', error);
-        }
+        padding: 10px;
       }
 
-      // Load face-api models (TinyFaceDetector and FaceExpressionNet)
-      async function loadFaceApiModels() {
-        const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
-        ]);
-        console.log('face-api models loaded');
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 15px;
       }
 
-      // Load the COCO-SSD model for object detection
-      async function loadObjectModel() {
-        objectModel = await cocoSsd.load();
-        console.log('COCO-SSD model loaded');
+      .video-container {
+        border-radius: 8px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      body {
+        padding: 5px;
       }
 
-      // Main detection function: processes each frame
-      async function detectFrame() {
-        if (video.paused || video.ended) {
-          return requestAnimationFrame(detectFrame);
-        }
-
-        // Run face detection with emotion recognition
-        const faceDetections = await faceapi
-          .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-          .withFaceExpressions();
-
-        // Run object detection using COCO-SSD
-        const objectDetections = await objectModel.detect(video);
-
-        // Adjust the canvas size to match the video
-        const displaySize = { width: video.width, height: video.height };
-        overlay.width = displaySize.width;
-        overlay.height = displaySize.height;
-
-        // Clear the canvas before drawing
-        context.clearRect(0, 0, overlay.width, overlay.height);
-
-        // Draw face detection results
-        faceDetections.forEach(detection => {
-          const { x, y, width, height } = detection.detection.box;
-
-          // Draw a rectangle around the face (green)
-          context.strokeStyle = '#00FF00';
-          context.lineWidth = 2;
-          context.strokeRect(x, y, width, height);
-
-          // Determine the dominant emotion
-          const expressions = detection.expressions;
-          let dominantEmotion = 'neutral';
-          let maxProb = 0;
-          for (const [emotion, probability] of Object.entries(expressions)) {
-            if (probability > maxProb) {
-              dominantEmotion = emotion;
-              maxProb = probability;
-            }
-          }
-
-          // Draw the emotion label above the face rectangle
-          context.font = '16px Arial';
-          context.fillStyle = '#00FF00';
-          context.fillText(dominantEmotion, x, y - 10);
-        });
-
-        // Draw object detection results
-        objectDetections.forEach(item => {
-          const [x, y, width, height] = item.bbox;
-          // Draw a rectangle around the object (blue)
-          context.strokeStyle = '#0000FF';
-          context.lineWidth = 2;
-          context.strokeRect(x, y, width, height);
-          // Draw the label and score above the rectangle
-          context.font = '16px Arial';
-          context.fillStyle = '#0000FF';
-          const label = `${item.class} (${(item.score * 100).toFixed(1)}%)`;
-          context.fillText(label, x, y - 10);
-        });
-
-        // Process the next frame
-        requestAnimationFrame(detectFrame);
+      h1 {
+        font-size: 1.2rem;
+        padding: 8px;
       }
+    }
+  </style>
+</head>
 
-      // Initialize everything
-      async function init() {
-        await Promise.all([loadFaceApiModels(), loadObjectModel()]);
-        await setupCamera();
+<body>
+  <h1>Object and Emotion Detection with TensorFlow.js</h1>
+  <div class="video-container">
+    <video id="video" autoplay></video>
+    <canvas id="canvas"></canvas>
+  </div>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
 
-        // Start detection once the video is playing
-        video.addEventListener('play', () => {
-          detectFrame();
-        });
-      }
+    // Load COCO-SSD model
+    async function loadObjectDetectionModel() {
+      return await cocoSsd.load();
+    }
 
-      // Start the app
-      init();
-    </script>
-  </body>
+    // Load Face-API.js models (face detection and emotion recognition)
+    async function loadFaceDetectionModels() {
+      const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+      ]);
+      console.log('face-api models loaded');
+    }
+
+    // Setup camera
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: false
+      });
+      video.srcObject = stream;
+      return new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+          resolve(video);
+        };
+      });
+    }
+
+    // Detect objects using COCO-SSD
+    async function detectObjects(model) {
+      const predictions = await model.detect(video);
+      return predictions;
+    }
+
+    // Detect emotions using Face-API.js
+    async function detectEmotions() {
+      const detections = await faceapi
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceExpressions();
+      return detections;
+    }
+
+    // Draw bounding boxes and labels
+    function drawPredictions(objectPredictions, emotionDetections) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw object detection results
+      objectPredictions.forEach(prediction => {
+        ctx.beginPath();
+        ctx.rect(...prediction.bbox);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#00ff00';
+        ctx.stroke();
+
+        // Draw label
+        const text = `${prediction.class} (${Math.round(prediction.score * 100)}%)`;
+        ctx.font = '16px Arial';
+        const textWidth = ctx.measureText(text).width;
+        const textHeight = 20;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(
+          prediction.bbox[0],
+          prediction.bbox[1] > textHeight ? prediction.bbox[1] - textHeight : prediction.bbox[1],
+          textWidth + 8,
+          textHeight
+        );
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(
+          text,
+          prediction.bbox[0] + 4,
+          prediction.bbox[1] > textHeight ? prediction.bbox[1] - 5 : prediction.bbox[1] + 15
+        );
+      });
+
+      // Draw emotion detection results
+      emotionDetections.forEach(detection => {
+        const { x, y, width, height } = detection.detection.box;
+        const expressions = detection.expressions;
+
+        // Draw face bounding box
+        ctx.beginPath();
+        ctx.rect(x, y, width, height);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#ff0000';
+        ctx.stroke();
+
+        // Draw emotion text
+        const emotion = Object.keys(expressions).reduce((a, b) =>
+          expressions[a] > expressions[b] ? a : b
+        );
+        const emotionText = `Emotion: ${emotion}`;
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+        ctx.fillRect(x, y - 20, ctx.measureText(emotionText).width + 8, 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(emotionText, x + 4, y - 5);
+      });
+    }
+
+    // Main function
+    async function main() {
+      await setupCamera();
+      video.play();
+
+      // Load models
+      const objectDetectionModel = await loadObjectDetectionModel();
+      await loadFaceDetectionModels();
+
+      // Set canvas dimensions
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      // Detection loop
+      setInterval(async () => {
+        const objectPredictions = await detectObjects(objectDetectionModel);
+        const emotionDetections = await detectEmotions();
+        drawPredictions(objectPredictions, emotionDetections);
+      }, 100);
+    }
+
+    main();
+  </script>
+</body>
+
 </html>
