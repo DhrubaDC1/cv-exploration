@@ -1,82 +1,149 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Client-Side Detection</title>
-    <style>
-        /* Same styling as before */
-    </style>
-</head>
-<body>
-    <!-- Same HTML structure as before -->
-
-    <!-- Updated compatible versions -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.8.6/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Face, Emotion, and Object Detection</title>
+    <!-- Load TensorFlow.js (using version 2.0.0 for compatibility) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
+    <!-- Load face-api.js -->
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <!-- Load COCO-SSD (depends on TensorFlow.js) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <style>
+      body {
+        text-align: center;
+        font-family: Arial, sans-serif;
+      }
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+      #videoContainer {
+        position: relative;
+        display: inline-block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Face, Emotion, and Object Detection</h1>
+    <div id="videoContainer">
+      <video id="video" width="720" height="560" autoplay muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
 
     <script>
-        async function startDetection() {
-            try {
-                // Load models sequentially to avoid conflicts
-                await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-                await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-                const objectModel = await cocoSsd.load();
+      const video = document.getElementById('video');
+      const overlay = document.getElementById('overlay');
+      const context = overlay.getContext('2d');
 
-                // Setup video stream
-                const video = document.getElementById('videoElement');
-                const canvas = document.getElementById('outputCanvas');
-                const ctx = canvas.getContext('2d');
+      let objectModel; // To hold the COCO-SSD model
 
-                const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
-                video.srcObject = stream;
+      // Start the webcam video stream
+      async function setupCamera() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+          video.srcObject = stream;
+        } catch (error) {
+          console.error('Error accessing webcam:', error);
+        }
+      }
 
-                async function detectFrame() {
-                    // Use TFJS backend utilities
-                    await tf.nextFrame().then(async () => {
-                        // Face detection
-                        const faceDetections = await faceapi.detectAllFaces(
-                            video,
-                            new faceapi.TinyFaceDetectorOptions()
-                        ).withFaceLandmarks();
+      // Load face-api models (TinyFaceDetector and FaceExpressionNet)
+      async function loadFaceApiModels() {
+        const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+        ]);
+        console.log('face-api models loaded');
+      }
 
-                        // Object detection
-                        const objects = await objectModel.  detect(video);
+      // Load the COCO-SSD model for object detection
+      async function loadObjectModel() {
+        objectModel = await cocoSsd.load();
+        console.log('COCO-SSD model loaded');
+      }
 
-                        // Clear canvas
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                        
-                        // Draw face detections
-                        faceDetections.forEach(detection => {
-                            const box = detection.detection.box;
-                            ctx.strokeStyle = '#00ff00';
-                            ctx.lineWidth = 2;
-                            ctx.strokeRect(box.x, box.y, box.width, box.height);
-                            ctx.fillText('Face', box.x, box.y > 10 ? box.y - 5 : 10);
-                        });
-
-                        // Draw object detections
-                        objects.forEach(object => {
-                            ctx.strokeStyle = '#ff0000';
-                            ctx.lineWidth = 2;
-                            ctx.strokeRect(...object.bbox);
-                            ctx.fillText(
-                                `${object.class} (${Math.round(object.score * 100)}%)`,
-                                object.bbox[0],
-                                object.bbox[1] > 10 ? object.bbox[1] - 5 : 10
-                            );
-                        });
-                    });
-
-                    requestAnimationFrame(detectFrame);
-                }
-
-                video.addEventListener('play', detectFrame);
-            } catch (error) {
-                console.error('Error initializing:', error);
-            }
+      // Main detection function: processes each frame
+      async function detectFrame() {
+        if (video.paused || video.ended) {
+          return requestAnimationFrame(detectFrame);
         }
 
-        window.onload = startDetection;
+        // Run face detection with emotion recognition
+        const faceDetections = await faceapi
+          .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+          .withFaceExpressions();
+
+        // Run object detection using COCO-SSD
+        const objectDetections = await objectModel.detect(video);
+
+        // Adjust the canvas size to match the video
+        const displaySize = { width: video.width, height: video.height };
+        overlay.width = displaySize.width;
+        overlay.height = displaySize.height;
+
+        // Clear the canvas before drawing
+        context.clearRect(0, 0, overlay.width, overlay.height);
+
+        // Draw face detection results
+        faceDetections.forEach(detection => {
+          const { x, y, width, height } = detection.detection.box;
+
+          // Draw a rectangle around the face (green)
+          context.strokeStyle = '#00FF00';
+          context.lineWidth = 2;
+          context.strokeRect(x, y, width, height);
+
+          // Determine the dominant emotion
+          const expressions = detection.expressions;
+          let dominantEmotion = 'neutral';
+          let maxProb = 0;
+          for (const [emotion, probability] of Object.entries(expressions)) {
+            if (probability > maxProb) {
+              dominantEmotion = emotion;
+              maxProb = probability;
+            }
+          }
+
+          // Draw the emotion label above the face rectangle
+          context.font = '16px Arial';
+          context.fillStyle = '#00FF00';
+          context.fillText(dominantEmotion, x, y - 10);
+        });
+
+        // Draw object detection results
+        objectDetections.forEach(item => {
+          const [x, y, width, height] = item.bbox;
+          // Draw a rectangle around the object (blue)
+          context.strokeStyle = '#0000FF';
+          context.lineWidth = 2;
+          context.strokeRect(x, y, width, height);
+          // Draw the label and score above the rectangle
+          context.font = '16px Arial';
+          context.fillStyle = '#0000FF';
+          const label = `${item.class} (${(item.score * 100).toFixed(1)}%)`;
+          context.fillText(label, x, y - 10);
+        });
+
+        // Process the next frame
+        requestAnimationFrame(detectFrame);
+      }
+
+      // Initialize everything
+      async function init() {
+        await Promise.all([loadFaceApiModels(), loadObjectModel()]);
+        await setupCamera();
+
+        // Start detection once the video is playing
+        video.addEventListener('play', () => {
+          detectFrame();
+        });
+      }
+
+      // Start the app
+      init();
     </script>
-</body>
+  </body>
 </html>
