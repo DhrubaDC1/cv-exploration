@@ -1,82 +1,402 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Client-Side Detection</title>
-    <style>
-        /* Same styling as before */
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Object and Emotion Detection with TensorFlow.js</title>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@latest/dist/face-api.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.4/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+      background-color: #f5f5f5;
+      overflow-x: hidden;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 20px;
+      font-size: 2rem;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      position: relative;
+      z-index: 10;
+    }
+    .video-container {
+      position: relative;
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      aspect-ratio: 16/9;
+    }
+    #video,
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    canvas {
+      pointer-events: none;
+    }
+    #toggle-btn {
+      display: block;
+      margin: 20px auto;
+      padding: 10px 20px;
+      font-size: 1rem;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    #toggle-btn:hover {
+      background-color: #0056b3;
+    }
+    #image-upload,
+    #video-upload {
+      display: none;
+      margin: 20px auto;
+      text-align: center;
+    }
+    #image-upload input,
+    #video-upload input {
+      margin-top: 10px;
+    }
+    /* Small canvas styles */
+    #small-canvas {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 300px; /* Increased width for timestamp */
+      height: auto;
+      max-height: 200px;
+      background: rgba(0, 0, 0, 0.7);
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+  </style>
 </head>
 <body>
-    <!-- Same HTML structure as before -->
+  <h1>Object and Emotion Detection with TensorFlow.js</h1>
+  
+  <div class="video-container">
+    <video id="video" autoplay></video>
+    <canvas id="canvas"></canvas>
+    <!-- Small canvas for face ID and emotions -->
+    <canvas id="small-canvas"></canvas>
+  </div>
 
-    <!-- Updated compatible versions -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.8.6/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <button id="toggle-btn">Switch to Image</button>
+  <div id="image-upload">
+    <p>Upload an image for detection:</p>
+    <input type="file" id="image-input" accept="image/*">
+  </div>
+  <div id="video-upload">
+    <p>Upload a video for detection:</p>
+    <input type="file" id="video-input" accept="video/*">
+  </div>
 
-    <script>
-        async function startDetection() {
-            try {
-                // Load models sequentially to avoid conflicts
-                await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-                await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-                const objectModel = await cocoSsd.load();
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const smallCanvas = document.getElementById('small-canvas');
+    const ctx = canvas.getContext('2d');
+    const smallCtx = smallCanvas.getContext('2d');
+    const toggleBtn = document.getElementById('toggle-btn');
+    const imageUploadDiv = document.getElementById('image-upload');
+    const videoUploadDiv = document.getElementById('video-upload');
+    const imageInput = document.getElementById('image-input');
+    const videoInput = document.getElementById('video-input');
 
-                // Setup video stream
-                const video = document.getElementById('videoElement');
-                const canvas = document.getElementById('outputCanvas');
-                const ctx = canvas.getContext('2d');
+    let isVideoMode = true; // Track whether we're in camera mode
+    let isImageMode = false; // Track whether we're in image mode
+    let isVideoFileMode = false; // Track whether we're in video file mode
+    let videoInterval = null; // Store the interval ID for video detection
+    let currentImage = null; // Store the currently uploaded image
+    let currentVideo = null; // Store the currently uploaded video
 
-                const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
-                video.srcObject = stream;
+    // Load COCO-SSD model
+    async function loadObjectDetectionModel() {
+      return await cocoSsd.load();
+    }
 
-                async function detectFrame() {
-                    // Use TFJS backend utilities
-                    await tf.nextFrame().then(async () => {
-                        // Face detection
-                        const faceDetections = await faceapi.detectAllFaces(
-                            video,
-                            new faceapi.TinyFaceDetectorOptions()
-                        ).withFaceLandmarks();
+    // Load Face-API.js models (face detection and emotion recognition)
+    async function loadFaceDetectionModels() {
+      const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+      ]);
+      console.log('face-api models loaded');
+    }
 
-                        // Object detection
-                        const objects = await objectModel.  detect(video);
+    // Setup camera
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: false
+      });
+      video.srcObject = stream;
+      return new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+          resolve(video);
+        };
+      });
+    }
 
-                        // Clear canvas
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                        
-                        // Draw face detections
-                        faceDetections.forEach(detection => {
-                            const box = detection.detection.box;
-                            ctx.strokeStyle = '#00ff00';
-                            ctx.lineWidth = 2;
-                            ctx.strokeRect(box.x, box.y, box.width, box.height);
-                            ctx.fillText('Face', box.x, box.y > 10 ? box.y - 5 : 10);
-                        });
+    // Detect objects using COCO-SSD
+    async function detectObjects(model, source) {
+      const predictions = await model.detect(source);
+      return predictions;
+    }
 
-                        // Draw object detections
-                        objects.forEach(object => {
-                            ctx.strokeStyle = '#ff0000';
-                            ctx.lineWidth = 2;
-                            ctx.strokeRect(...object.bbox);
-                            ctx.fillText(
-                                `${object.class} (${Math.round(object.score * 100)}%)`,
-                                object.bbox[0],
-                                object.bbox[1] > 10 ? object.bbox[1] - 5 : 10
-                            );
-                        });
-                    });
+    // Detect emotions using Face-API.js
+    async function detectEmotions(source) {
+      const detections = await faceapi
+        .detectAllFaces(source, new faceapi.TinyFaceDetectorOptions())
+        .withFaceExpressions();
+      return detections;
+    }
 
-                    requestAnimationFrame(detectFrame);
-                }
+    // Draw bounding boxes and labels on the main canvas
+    function drawPredictions(objectPredictions, emotionDetections, source) {
+      // Clear the main canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                video.addEventListener('play', detectFrame);
-            } catch (error) {
-                console.error('Error initializing:', error);
-            }
+      // Redraw the source (image or video) on the main canvas
+      if (source instanceof HTMLImageElement) {
+        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+      } else if (source instanceof HTMLVideoElement) {
+        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+      }
+
+      // Draw object detection results
+      objectPredictions.forEach(prediction => {
+        ctx.beginPath();
+        ctx.rect(...prediction.bbox);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#00ff00';
+        ctx.stroke();
+
+        // Draw label
+        const text = `${prediction.class} (${Math.round(prediction.score * 100)}%)`;
+        ctx.font = '16px Arial';
+        const textWidth = ctx.measureText(text).width;
+        const textHeight = 20;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(
+          prediction.bbox[0],
+          prediction.bbox[1] > textHeight ? prediction.bbox[1] - textHeight : prediction.bbox[1],
+          textWidth + 8,
+          textHeight
+        );
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(
+          text,
+          prediction.bbox[0] + 4,
+          prediction.bbox[1] > textHeight ? prediction.bbox[1] - 5 : prediction.bbox[1] + 15
+        );
+      });
+
+      // Log and draw emotion detection results
+      emotionDetections.forEach((detection, index) => {
+        const { x, y, width, height } = detection.detection.box;
+        const expressions = detection.expressions;
+
+        // Determine the dominant emotion
+        const emotion = Object.keys(expressions).reduce((a, b) =>
+          expressions[a] > expressions[b] ? a : b
+        );
+
+        // Assign face ID based on the index in the current frame
+        const faceId = index + 1;
+
+        // Log the face ID and emotion
+        console.log({ [`face id ${faceId}`]: emotion });
+
+        // Draw face bounding box
+        ctx.beginPath();
+        ctx.rect(x, y, width, height);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#ff0000';
+        ctx.stroke();
+
+        // Draw emotion text
+        const emotionText = `Person ${faceId} is feeling ${emotion}`;
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+        ctx.fillRect(x, y - 20, ctx.measureText(emotionText).width + 8, 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(emotionText, x + 4, y - 5);
+      });
+    }
+
+    // Draw face IDs, emotions, and timestamps on the small canvas
+    function drawSmallCanvas(emotionDetections) {
+      // Clear the small canvas
+      smallCtx.clearRect(0, 0, smallCanvas.width, smallCanvas.height);
+
+      // Set font and styling
+      smallCtx.font = '14px Arial';
+      smallCtx.fillStyle = '#ffffff';
+
+      // Get the current timestamp
+      const timestamp = new Date().toLocaleTimeString();
+
+      // Draw each face ID, timestamp, and emotion
+      emotionDetections.forEach((detection, index) => {
+        const expressions = detection.expressions;
+
+        // Determine the dominant emotion
+        const emotion = Object.keys(expressions).reduce((a, b) =>
+          expressions[a] > expressions[b] ? a : b
+        );
+
+        // Assign face ID based on the index in the current frame
+        const faceId = index + 1;
+
+        // Draw text on the small canvas
+        smallCtx.fillText(
+          `[${timestamp}] Face ID: ${faceId}, Emotion: ${emotion}`,
+          10,
+          20 + index * 20
+        );
+      });
+    }
+
+    // Handle image upload
+    async function handleImageUpload(model, file) {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = async () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        currentImage = img; // Store the uploaded image
+
+        // Perform detection and draw results
+        const objectPredictions = await detectObjects(model, img);
+        const emotionDetections = await detectEmotions(img);
+        drawPredictions(objectPredictions, emotionDetections, img);
+        drawSmallCanvas(emotionDetections);
+      };
+    }
+
+    // Handle video file upload
+    async function handleVideoUpload(model, file) {
+      const vid = document.createElement('video');
+      vid.src = URL.createObjectURL(file);
+      vid.controls = true;
+      vid.autoplay = true;
+      vid.style.display = 'none';
+      document.body.appendChild(vid);
+
+      vid.onloadedmetadata = async () => {
+        canvas.width = vid.videoWidth;
+        canvas.height = vid.videoHeight;
+        currentVideo = vid;
+
+        // Start video file detection loop
+        videoInterval = setInterval(async () => {
+          const objectPredictions = await detectObjects(model, vid);
+          const emotionDetections = await detectEmotions(vid);
+          drawPredictions(objectPredictions, emotionDetections, vid);
+          drawSmallCanvas(emotionDetections);
+        }, 100);
+      };
+    }
+
+    // Main function
+    async function main() {
+      const objectDetectionModel = await loadObjectDetectionModel();
+      await loadFaceDetectionModels();
+
+      if (isVideoMode) {
+        await setupCamera();
+        video.play();
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        // Start video detection loop
+        videoInterval = setInterval(async () => {
+          const objectPredictions = await detectObjects(objectDetectionModel, video);
+          const emotionDetections = await detectEmotions(video);
+          drawPredictions(objectPredictions, emotionDetections, video);
+          drawSmallCanvas(emotionDetections);
+        }, 100);
+      }
+
+      // Toggle between camera, image, and video file modes
+      toggleBtn.addEventListener('click', () => {
+        if (isVideoMode) {
+          isVideoMode = false;
+          isImageMode = true;
+          isVideoFileMode = false;
+          toggleBtn.textContent = 'Switch to Video File';
+          imageUploadDiv.style.display = 'block'; // Show image upload section
+          videoUploadDiv.style.display = 'none'; // Hide video upload section
+          video.style.display = 'none'; // Hide video element
+          canvas.style.display = 'block'; // Show canvas
+
+          // Stop video detection loop
+          clearInterval(videoInterval);
+        } else if (isImageMode) {
+          isVideoMode = false;
+          isImageMode = false;
+          isVideoFileMode = true;
+          toggleBtn.textContent = 'Switch to Camera';
+          imageUploadDiv.style.display = 'none'; // Hide image upload section
+          videoUploadDiv.style.display = 'block'; // Show video upload section
+          video.style.display = 'none'; // Hide video element
+          canvas.style.display = 'block'; // Show canvas
+
+          // Stop any ongoing detection
+          clearInterval(videoInterval);
+        } else {
+          isVideoMode = true;
+          isImageMode = false;
+          isVideoFileMode = false;
+          toggleBtn.textContent = 'Switch to Image';
+          imageUploadDiv.style.display = 'none'; // Hide image upload section
+          videoUploadDiv.style.display = 'none'; // Hide video upload section
+          video.style.display = 'block'; // Show video element
+          canvas.style.display = 'block'; // Show canvas
+
+          // Restart camera detection loop
+          clearInterval(videoInterval);
+          main();
         }
+      });
 
-        window.onload = startDetection;
-    </script>
+      // Handle image upload
+      imageInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+          handleImageUpload(objectDetectionModel, file);
+        }
+      });
+
+      // Handle video file upload
+      videoInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+          handleVideoUpload(objectDetectionModel, file);
+        }
+      });
+    }
+
+    main();
+  </script>
 </body>
 </html>
