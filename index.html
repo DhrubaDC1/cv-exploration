@@ -172,77 +172,91 @@
 
     // Detect emotions using Face-API.js
     async function detectEmotions(source) {
-      const detections = await faceapi
-        .detectAllFaces(source, new faceapi.SsdMobilenetv1Options())
-        .withFaceLandmarks()
-        .withFaceDescriptors()
-        .withFaceExpressions();
+      try {
+        const detections = await faceapi
+          .detectAllFaces(source, new faceapi.SsdMobilenetv1Options({
+            minConfidence: 0.5  // Increased confidence threshold
+          }))
+          .withFaceLandmarks()
+          .withFaceDescriptors()
+          .withFaceExpressions();
 
-      // Update detections with face IDs
-      const detectionWithIds = detections.map(detection => {
-        const id = faceTracker.updateFace(detection.descriptor, {
-          expressions: detection.expressions,
-          detection: detection.detection
+        if (!detections || detections.length === 0) return [];
+
+        // Update detections with face IDs
+        const detectionWithIds = detections.map(detection => {
+          const id = faceTracker.updateFace(detection.descriptor, detection);
+          return { ...detection, faceId: id };
         });
-        return { ...detection, faceId: id };
-      });
 
-      return detectionWithIds;
+        return detectionWithIds;
+      } catch (error) {
+        console.error('Error in detectEmotions:', error);
+        return [];
+      }
     }
 
     // Draw bounding boxes and labels on the main canvas
     function drawPredictions(objectPredictions, emotionDetections, source) {
-      // Clear the main canvas
+      const ctx = canvas.getContext('2d');
+      canvas.width = source.width || source.videoWidth;
+      canvas.height = source.height || source.videoHeight;
+
+      // Clear the canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Redraw the source (image or video) on the main canvas
-      if (source instanceof HTMLImageElement) {
-        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-      } else if (source instanceof HTMLVideoElement) {
-        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-      }
+      // Draw the video/image
+      ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
 
-      // Draw object detection results
+      // Draw object detections
       objectPredictions.forEach(prediction => {
-        ctx.beginPath();
-        ctx.rect(...prediction.bbox);
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#00ff00';
-        ctx.stroke();
-
-        // Draw label
-        const text = `${prediction.class} (${Math.round(prediction.score * 100)}%)`;
-        ctx.font = '16px Arial';
-        const textWidth = ctx.measureText(text).width;
-        const textHeight = 20;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(
-          prediction.bbox[0],
-          prediction.bbox[1] > textHeight ? prediction.bbox[1] - textHeight : prediction.bbox[1],
-          textWidth + 8,
-          textHeight
+        const { bbox, class: label, score } = prediction;
+        
+        // Create box with same style as face detection
+        const drawBox = new faceapi.draw.DrawBox(
+          new faceapi.Rect(bbox[0], bbox[1], bbox[2], bbox[3]), 
+          {
+            label: `${label} (${Math.round(score * 100)}%)`,
+            lineWidth: 2,
+            boxColor: '#00ff00',
+            drawLabelOptions: {
+              backgroundColor: 'rgba(0, 255, 0, 0.7)',
+              fontColor: 'white'
+            }
+          }
         );
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(
-          text,
-          prediction.bbox[0] + 4,
-          prediction.bbox[1] > textHeight ? prediction.bbox[1] - 5 : prediction.bbox[1] + 15
-        );
+        drawBox.draw(canvas);
       });
 
-      // Draw face detections with IDs
+      // Draw face detections with IDs and emotions
       emotionDetections.forEach(detection => {
         const { box } = detection.detection;
         const emotions = detection.expressions;
-        // Get dominant emotion
+        
+        // Get dominant emotion and its confidence
         const dominantEmotion = Object.entries(emotions)
-          .reduce((a, b) => (a[1] > b[1] ? a : b))[0];
+          .reduce((a, b) => (a[1] > b[1] ? a : b));
+        
+        const confidence = Math.round(dominantEmotion[1] * 100);
+        const label = `Face ${detection.faceId} | ${dominantEmotion[0]} (${confidence}%)`;
         
         const drawBox = new faceapi.draw.DrawBox(box, {
-          label: `Face ID: ${detection.faceId} | ${dominantEmotion}`,
-          lineWidth: 2
+          label,
+          lineWidth: 2,
+          boxColor: '#ff0000',
+          drawLabelOptions: {
+            backgroundColor: 'rgba(255, 0, 0, 0.7)',
+            fontColor: 'white'
+          }
         });
         drawBox.draw(canvas);
+
+        // Draw face landmarks for better visualization
+        const landmarks = detection.landmarks;
+        if (landmarks) {
+          const drawLandmarks = new faceapi.draw.DrawFaceLandmarks(landmarks);
+          drawLandmarks.draw(canvas);
+        }
       });
     }
 
