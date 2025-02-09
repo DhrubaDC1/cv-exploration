@@ -109,7 +109,9 @@
     <input type="file" id="video-input" accept="video/*">
   </div>
 
-  <script>
+  <script type="module">
+    import FaceTracker from './src/faceid.js';
+
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const smallCanvas = document.getElementById('small-canvas');
@@ -127,6 +129,7 @@
     let videoInterval = null; // Store the interval ID for video detection
     let currentImage = null; // Store the currently uploaded image
     let currentVideo = null; // Store the currently uploaded video
+    let faceTracker;
 
     // Load COCO-SSD model
     async function loadObjectDetectionModel() {
@@ -135,12 +138,16 @@
 
     // Load Face-API.js models (face detection and emotion recognition)
     async function loadFaceDetectionModels() {
-      const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+      const MODEL_URL = '/models';
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL)
       ]);
-      console.log('face-api models loaded');
+      faceTracker = new FaceTracker();
+      console.log('All face-api models loaded successfully');
     }
 
     // Setup camera
@@ -166,9 +173,21 @@
     // Detect emotions using Face-API.js
     async function detectEmotions(source) {
       const detections = await faceapi
-        .detectAllFaces(source, new faceapi.TinyFaceDetectorOptions())
+        .detectAllFaces(source, new faceapi.SsdMobilenetv1Options())
+        .withFaceLandmarks()
+        .withFaceDescriptors()
         .withFaceExpressions();
-      return detections;
+
+      // Update detections with face IDs
+      const detectionWithIds = detections.map(detection => {
+        const id = faceTracker.updateFace(detection.descriptor, {
+          expressions: detection.expressions,
+          detection: detection.detection
+        });
+        return { ...detection, faceId: id };
+      });
+
+      return detectionWithIds;
     }
 
     // Draw bounding boxes and labels on the main canvas
@@ -211,35 +230,19 @@
         );
       });
 
-      // Log and draw emotion detection results
-      emotionDetections.forEach((detection, index) => {
-        const { x, y, width, height } = detection.detection.box;
-        const expressions = detection.expressions;
-
-        // Determine the dominant emotion
-        const emotion = Object.keys(expressions).reduce((a, b) =>
-          expressions[a] > expressions[b] ? a : b
-        );
-
-        // Assign face ID based on the index in the current frame
-        const faceId = index + 1;
-
-        // Log the face ID and emotion
-        console.log({ [`face id ${faceId}`]: emotion });
-
-        // Draw face bounding box
-        ctx.beginPath();
-        ctx.rect(x, y, width, height);
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#ff0000';
-        ctx.stroke();
-
-        // Draw emotion text
-        const emotionText = `Person ${faceId} is feeling ${emotion}`;
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
-        ctx.fillRect(x, y - 20, ctx.measureText(emotionText).width + 8, 20);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(emotionText, x + 4, y - 5);
+      // Draw face detections with IDs
+      emotionDetections.forEach(detection => {
+        const { box } = detection.detection;
+        const emotions = detection.expressions;
+        // Get dominant emotion
+        const dominantEmotion = Object.entries(emotions)
+          .reduce((a, b) => (a[1] > b[1] ? a : b))[0];
+        
+        const drawBox = new faceapi.draw.DrawBox(box, {
+          label: `Face ID: ${detection.faceId} | ${dominantEmotion}`,
+          lineWidth: 2
+        });
+        drawBox.draw(canvas);
       });
     }
 
@@ -265,7 +268,7 @@
         );
 
         // Assign face ID based on the index in the current frame
-        const faceId = index + 1;
+        const faceId = detection.faceId;
 
         // Draw text on the small canvas
         smallCtx.fillText(
