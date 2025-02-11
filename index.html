@@ -121,6 +121,34 @@
     .save-button:hover {
       background: #45a049;
     }
+    .video-container {
+      position: relative;
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      aspect-ratio: 16/9;
+    }
+    
+    #toggle-history {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      z-index: 100;
+    }
+    
+    #toggle-history:hover {
+      background-color: #0056b3;
+    }
   </style>
 </head>
 <body>
@@ -129,6 +157,9 @@
   <div class="video-container">
     <video id="video" autoplay></video>
     <canvas id="canvas"></canvas>
+    <div class="top-controls">
+      <button id="toggle-history">Toggle History</button>
+    </div>
     <!-- Detection history container -->
     <div id="detection-history" class="detection-history"></div>
     <button id="save-history" class="save-button">Save History</button>
@@ -291,12 +322,33 @@
 
         // Draw face landmarks for better visualization
         const landmarks = detection.landmarks;
-        // if (landmarks) {
-        //   const drawLandmarks = new faceapi.draw.DrawFaceLandmarks(landmarks);
-        //   drawLandmarks.draw(canvas);
-        // }
+        if (landmarks) {
+          const drawLandmarks = new faceapi.draw.DrawFaceLandmarks(landmarks);
+          drawLandmarks.draw(canvas);
+        }
       });
     }
+
+
+    // Add this function to your existing script
+function toggleHistoryVisibility() {
+  const historyContainer = document.getElementById('detection-history');
+  const saveButton = document.getElementById('save-history');
+
+  if (historyContainer.style.display === 'none') {
+    historyContainer.style.display = 'block';
+    saveButton.style.display = 'block';
+    document.getElementById('toggle-history').textContent = 'Hide History';
+  } else {
+    historyContainer.style.display = 'none';
+    saveButton.style.display = 'none';
+    document.getElementById('toggle-history').textContent = 'Show History';
+  }
+}
+
+// Add this event listener to your existing script
+document.getElementById('toggle-history').addEventListener('click', toggleHistoryVisibility);
+
 
     // Function to save history to JSON file
     function saveHistoryToJson() {
@@ -482,6 +534,10 @@
           clearInterval(videoInterval);
           main();
         }
+
+        // Call toggleHistoryVisibility after changing modes
+        toggleHistoryVisibility();
+
       });
 
       // Handle image upload
